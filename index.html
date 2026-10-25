@@ -1179,7 +1179,7 @@ function gauge(pos, label, zone) {
       <path d="M${cx - 4} ${cy} L${cx} ${cy - 78} L${cx + 4} ${cy} Z" fill="var(--ink)"/>
     </g>
     <circle cx="${cx}" cy="${cy}" r="9" fill="var(--ink)"/>
-    <circle cx="${cx}" cy="${cy}" r="3.5" fill="var(--accent)"/>
+    <circle class="hub" cx="${cx}" cy="${cy}" r="3.5" fill="${zone == null ? "var(--accent)" : `var(${ZONE_VAR[zone]})`}"/>
   </svg>`;
 }
 
