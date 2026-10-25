@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d0f">
-<meta name="description" content="Pressure Check: zie in 3 minuten hoeveel druk je voelt en wat je vandaag al kunt doen. Anoniem, niets wordt verstuurd.">
+<meta name="description" content="Pressure Check: zie in 2 minuten hoeveel druk je voelt en wat je vandaag al kunt doen. Anoniem, niets wordt verstuurd.">
 <title>Pressure Check</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='6' fill='%230b0d0f'/%3E%3Ccircle cx='14' cy='14' r='10' fill='none' stroke='%23c89a4f' stroke-width='2.5'/%3E%3Cpath d='M14 14 L19 9' stroke='%23e0ba74' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
@@ -119,10 +119,19 @@ a { color: var(--gold); }
 /* gauge */
 .gauge { width: 100%; max-width: 300px; height: auto; display: block; }
 .gauge .needle { transform-box: view-box; transform-origin: 120px 124px; transition: transform 1.1s cubic-bezier(.2,.9,.25,1.15); }
+/* Result gauge: other bands dimmed; the own band lights up as the needle lands (≈1 s), then the text appears. */
+.gauge .seg.off { stroke: #2c3237; } /* neutral, not a dimmed colour: dimmed orange and red read as brown on black */
+.gauge .seg.on { animation: seg-on .5s ease-out .95s both; }
+@keyframes seg-on { from { opacity: .2; } to { opacity: 1; filter: drop-shadow(0 0 5px var(--zone-c)); } }
 
-/* result */
-.zone { border-radius: var(--radius); padding: 22px 18px; display: grid; gap: 14px; justify-items: center; text-align: center; border: 1px solid var(--line); }
-.zone.ok { background: var(--ok-soft); } .zone.warn { background: var(--warn-soft); } .zone.bad { background: var(--bad-soft); }
+/* result: neutral card like the rest, the zone shows as a top line and a soft glow behind the gauge */
+.zone { --zone-c: var(--ok); position: relative; isolation: isolate; overflow: hidden; border-radius: var(--radius); padding: 22px 18px;
+  display: grid; gap: 14px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--zone-c); }
+.zone.warn { --zone-c: var(--warn); } .zone.bad { --zone-c: var(--bad); }
+.zone::before { content: ""; position: absolute; inset: 0; z-index: -1;
+  background: radial-gradient(70% 50% at 50% 38%, color-mix(in srgb, var(--zone-c) 14%, transparent), transparent 72%); }
+.zone p { animation: fade-in .4s ease-out 1.2s both; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .zone-tag { font: 800 .78rem var(--display); letter-spacing: .12em; text-transform: uppercase; padding: 6px 12px; border-radius: 999px; color: var(--surface); }
 .zone p { max-width: 48ch; }
 
@@ -180,7 +189,7 @@ dialog::backdrop { background: rgba(7, 9, 10, .78); }
 
 @media (prefers-reduced-motion: reduce) {
   .gauge .needle, .bar-progress span, .opt { transition: none; }
-  .enter { animation: none; }
+  .enter, .zone p, .gauge .seg.on { animation: none; }
 }
 
 </style>
@@ -477,7 +486,7 @@ const CONTENT_NL = {
     eyebrow: "Check in met jezelf",
     h1: "Hoeveel druk voel jij deze week?",
     lede: "Druk hoort erbij. Het helpt je soms zelfs. Deze check laat zien of jouw druk nog gezond is en wat je vandaag al kunt doen.",
-    facts: ["3 minuten", "Anoniem", "Geen account nodig"],
+    facts: ["2 minuten", "Anoniem", "Geen account nodig"],
     start: "Start de check",
     next: "Volgende",
     back: "Terug",
@@ -765,7 +774,7 @@ const CONTENT_EN = {
     eyebrow: "Check in with yourself",
     h1: "How much pressure are you feeling this week?",
     lede: "Pressure is normal. Sometimes it even helps. This check shows whether your pressure is still healthy and what you can do about it today.",
-    facts: ["3 minutes", "Anonymous", "No account needed"],
+    facts: ["2 minutes", "Anonymous", "No account needed"],
     start: "Start the check",
     next: "Next",
     back: "Back",
@@ -1122,8 +1131,10 @@ function enterResult() {
 }
 
 // ---------- shared pieces ----------
-function gauge(pos, label) {
+// Zone gauge. With a zone, the other bands are dimmed and the own band lights up once the needle lands.
+function gauge(pos, label, zone) {
   const cx = 120, cy = 124, r = 92, gap = 0.025;
+  const seg = (z, a0, a1) => `<path class="seg${zone == null ? "" : z === zone ? " on" : " off"}" d="${arc(a0, a1)}" stroke="var(${ZONE_VAR[z]})" stroke-width="16" fill="none"/>`;
   const arc = (a0, a1) => {
     const p = (a) => [cx + r * Math.cos(a), cy - r * Math.sin(a)];
     const [x0, y0] = p(a0), [x1, y1] = p(a1);
@@ -1136,9 +1147,9 @@ function gauge(pos, label) {
   }).join("");
   const deg = pos == null ? -62 : pos * 180 - 90;
   return `<svg class="gauge" viewBox="0 0 240 134" ${label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"'}>
-    <path d="${arc(Math.PI, b1 + gap)}" stroke="var(--ok)" stroke-width="16" fill="none"/>
-    <path d="${arc(b1 - gap, b2 + gap)}" stroke="var(--warn)" stroke-width="16" fill="none"/>
-    <path d="${arc(b2 - gap, 0)}" stroke="var(--bad)" stroke-width="16" fill="none"/>
+    ${seg(0, Math.PI, b1 + gap)}
+    ${seg(1, b1 - gap, b2 + gap)}
+    ${seg(2, b2 - gap, 0)}
     ${ticks}
     <g class="needle" style="transform: rotate(${pos == null ? deg : -90}deg)" data-deg="${deg}">
       <path d="M${cx - 4} ${cy} L${cx} ${cy - 78} L${cx + 4} ${cy} Z" fill="var(--ink)"/>
@@ -1279,7 +1290,7 @@ const SECTIONS = {
     const prev = ui.prev && L.zoneNames[ui.prev.zone] ? `<p class="hint">${esc(U.prev(L.zoneNames[ui.prev.zone], ui.prev.n2, ui.prev.d))}</p>` : "";
     return `<section class="zone ${ZONE_CLASS[r.zone]}">
       <span class="zone-tag" style="background:var(${ZONE_VAR[r.zone]})">${esc(L.zoneNames[r.zone])}</span>
-      ${gauge(Engine.gaugePosition(ui.s), L.zoneNames[r.zone])}
+      ${gauge(Engine.gaugePosition(ui.s), L.zoneNames[r.zone], r.zone)}
       <p>${esc(text)}</p>
       <p class="hint">${esc(U.notDiagnosis)}</p>
       ${prev}

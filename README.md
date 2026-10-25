@@ -1,6 +1,6 @@
 # Pressure Check
 
-Een korte check (± 3 minuten) voor jongeren van 16 tot 25: hoeveel druk voel je, welke signalen merk je en wat kun je vandaag al doen.
+Een korte check (± 2 minuten) voor jongeren van 16 tot 25: hoeveel druk voel je, welke signalen merk je en wat kun je vandaag al doen.
 
 **Open de check:** https://pesall.github.io/pressure-check/
 **Poster met QR-code (A4):** https://pesall.github.io/pressure-check/poster.pdf
