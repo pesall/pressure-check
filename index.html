@@ -157,7 +157,12 @@ a { color: var(--gold); }
 .recipients .label { font-size: .85rem; color: var(--muted); margin-right: 2px; }
 .pill { min-height: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); font: 600 .88rem var(--body); cursor: pointer; }
 .pill[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.msg { margin: 0; padding: 14px 16px; border-left: 3px solid var(--accent); background: #12171a; border-radius: 0 10px 10px 0; font-style: italic; }
+/* Editable message: looks like the quote block, but is a real text field you can change before sending. */
+.msg { display: block; width: 100%; min-height: 7.5em; margin: 0; padding: 14px 16px; resize: vertical;
+  font: 400 1rem/1.5 var(--body); color: var(--ink); background: #12171a;
+  border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; }
+.msg:focus { outline: none; border-color: var(--gold); border-left-color: var(--accent); }
+label.hint { margin-bottom: -6px; }
 .copied { font-size: .85rem; color: var(--ok); }
 
 .stat { display: flex; gap: 14px; align-items: flex-start; }
@@ -501,6 +506,7 @@ const CONTENT_NL = {
     notDiagnosis: "Dit is geen diagnose. Het is een momentopname van wat je nu merkt.",
     prev: (zone, n2, d) => `Vorige keer (${d}): ${zone}, ${n2} ${n2 === 1 ? "signaal" : "signalen"} vaak.`,
     saved: "Je uitslag is op dit apparaat bewaard, zodat je de volgende keer kunt vergelijken.",
+    messageLabel: "Je bericht, pas het gerust aan",
     copy: "Kopieer",
     copied: "Gekopieerd",
     copyFail: "Selecteer de tekst om te kopiëren.",
@@ -798,6 +804,7 @@ const CONTENT_EN = {
     notDiagnosis: "This is not a diagnosis. It's a snapshot of what you notice right now.",
     prev: (zone, n2, d) => `Last time (${d}): ${zone}, ${n2} ${n2 === 1 ? "signal" : "signals"} often.`,
     saved: "Your result is saved on this device, so you can compare next time.",
+    messageLabel: "Your message, feel free to change it",
     copy: "Copy",
     copied: "Copied",
     copyFail: "Select the text to copy it.",
@@ -1114,6 +1121,7 @@ const ui = {
   prev: undefined, // last stored result, read once per check before saving the new one
   saved: false,
   recipient: null, // message recipient chosen on the result screen
+  edits: {},       // messages the user changed, per recipient (or "checkin"), kept when switching
 };
 const T = () => TEXT[ui.lang];
 const allAnswered = () => ui.s.answers.every((a) => a != null);
@@ -1294,8 +1302,16 @@ function messageBlock(topic) {
   const L = T(), M = L.messages, U = L.ui;
   return `<div class="recipients" role="group" aria-label="${esc(L.talk.switchLabel)}"><span class="label">${esc(L.talk.switchLabel)}</span>
       ${Object.keys(M.opener).map((r) => `<button class="pill" type="button" data-recipient="${r}" aria-pressed="${ui.recipient === r}">${esc(M.recipientLabel[r])}</button>`).join("")}</div>
-    <blockquote class="msg" id="msg-text">${esc(message(ui.recipient, topic))}</blockquote>
-    <div class="actions"><button class="btn ghost small" type="button" data-copy="msg-text">${esc(U.copy)}</button><span class="copied" id="copied" aria-live="polite"></span></div>`;
+    ${msgEditor(ui.recipient, message(ui.recipient, topic))}`;
+}
+
+// Editable message: change it before copying or sharing. "Deel" opens the phone's share sheet; nothing is
+// sent until the user picks an app and a person.
+function msgEditor(key, text) {
+  const U = T().ui;
+  return `<label class="hint" for="msg-text">${esc(U.messageLabel)}</label>
+    <textarea class="msg" id="msg-text" data-key="${key}" rows="4">${esc(ui.edits[key] ?? text)}</textarea>
+    <div class="actions">${navigator.share ? `<button class="btn small" type="button" data-share-msg>${esc(U.share)}</button>` : ""}<button class="btn ghost small" type="button" data-copy="msg-text">${esc(U.copy)}</button><span class="copied" id="copied" aria-live="polite"></span></div>`;
 }
 
 // Anonymous start: the youth line that fits the occupation, plus 113's chat. Lines are left out when the
@@ -1353,8 +1369,7 @@ const SECTIONS = {
     const L = T(), U = L.ui;
     if (r.talk.mode === "checkin") {
       return `<section class="panel stack"><h2>${esc(L.talk.checkinH)}</h2><p class="muted">${esc(L.talk.checkinP)}</p>
-        <blockquote class="msg" id="msg-text">${esc(L.talk.checkin)}</blockquote>
-        <div class="actions"><button class="btn ghost small" type="button" data-copy="msg-text">${esc(U.copy)}</button><span class="copied" id="copied" aria-live="polite"></span></div></section>`;
+        ${msgEditor("checkin", L.talk.checkin)}</section>`;
     }
     if (r.talk.anonymous) return anonBlock(r);
     return `<section class="panel stack"><h2>${esc(L.talk.messageH)}</h2><p class="muted">${esc(L.talk.messageP)}</p>${messageBlock(r.talk.topic)}</section>`;
@@ -1476,22 +1491,32 @@ app.addEventListener("click", async (e) => {
   if (btn.dataset.recipient) {
     ui.recipient = btn.dataset.recipient;
     const r = Engine.result(ui.s);
-    $("msg-text").textContent = message(ui.recipient, r.talk.topic);
+    const box = $("msg-text");
+    box.value = ui.edits[ui.recipient] ?? message(ui.recipient, r.talk.topic);
+    box.dataset.key = ui.recipient;
     app.querySelectorAll("[data-recipient]").forEach((b) => b.setAttribute("aria-pressed", b === btn));
     $("copied").textContent = "";
     return;
   }
   if (btn.dataset.copy) {
     const el = $(btn.dataset.copy), out = $("copied");
-    try { await navigator.clipboard.writeText(el.textContent); out.textContent = "✓ " + T().ui.copied; }
-    catch (err) { const range = document.createRange(); range.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); out.textContent = T().ui.copyFail; }
+    try { await navigator.clipboard.writeText(el.value); out.textContent = "✓ " + T().ui.copied; }
+    catch (err) { el.focus(); el.select(); out.textContent = T().ui.copyFail; }
+    return;
+  }
+  if (btn.dataset.shareMsg != null) {
+    try { await navigator.share({ text: $("msg-text").value }); } catch (err) { /* cancelled */ }
     return;
   }
   if (btn.dataset.plan) return openPlan(btn.dataset.plan);
   const action = btn.dataset.action;
   if (action === "next") go(1);
   if (action === "back") go(-1);
-  if (action === "again") { ui.s = freshState(); ui.idx = 0; ui.saved = false; ui.prev = undefined; render(true); }
+  if (action === "again") { ui.s = freshState(); ui.idx = 0; ui.saved = false; ui.prev = undefined; ui.edits = {}; render(true); }
+});
+
+app.addEventListener("input", (e) => {
+  if (e.target.id === "msg-text") ui.edits[e.target.dataset.key] = e.target.value;
 });
 
 app.addEventListener("change", (e) => {
