@@ -110,12 +110,15 @@ a { color: var(--gold); }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Like the badges on metreagyano.nl (silver-grey border, light grey text), one shade lighter than our black page. */
 .fact { font-size: .85rem; padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid #394045; color: #d0d4d6; }
-.gauge-card { display: grid; gap: 14px; justify-items: center; }
-.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
-.legend div { display: grid; gap: 2px; font-size: .84rem; }
-.legend b { font-family: var(--display); font-size: .95rem; display: flex; align-items: center; gap: 6px; }
-.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-@media (max-width: 480px) { .legend { grid-template-columns: 1fr; } }
+.steps { display: grid; gap: 14px; }
+.step { display: flex; gap: 14px; align-items: baseline; }
+.step .num, .strategy .num { font-family: var(--display); font-weight: 800; font-size: 1.4rem; color: var(--accent); line-height: 1; flex: none; }
+
+/* summary for the conversation with a coach */
+.sum { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; }
+.sum dt { font: 800 .7rem var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-top: 10px; }
+.sum dt:first-child { margin-top: 0; }
+.sum dd { margin: 0; }
 
 /* gauge */
 .gauge { width: 100%; max-width: 300px; height: auto; display: block; }
@@ -148,7 +151,6 @@ a { color: var(--gold); }
 
 .strategy { display: grid; gap: 10px; padding: 18px 0; border-top: 1px solid var(--line); }
 .strategy:first-of-type { border-top: 0; padding-top: 2px; }
-.strategy .num { font-family: var(--display); font-weight: 800; font-size: 1.4rem; color: var(--accent); line-height: 1; }
 .todo { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; }
 .todo dt { font: 800 .7rem var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); padding-top: 4px; }
 .todo dd { margin: 0; min-width: 0; }
@@ -232,6 +234,7 @@ dialog::backdrop { background: rgba(7, 9, 10, .78); }
 //     sources: ["study", ...],            // may contain "unknown" (exclusive)
 //     heaviest: "study"|null,             // only asked when 2+ real sources
 //     answers: [0..3 × 8],                // signal items in SIGNALS order
+//     reaction: "withdraw"|null,          // "what did you do then?" about one recent moment (feedback round 2)
 //     followups: { "sig.sleep": "late", "src.study": "planning", recipient: "friend", strength: "sport" } }
 const Engine = (() => {
   // Item order is the tie-break order (plan §B3). Domain only groups rows on the signal card.
@@ -241,15 +244,16 @@ const Engine = (() => {
     { id: "worry", domain: "head" },
     { id: "enough", domain: "head" },
     { id: "start", domain: "head" },
-    { id: "body", domain: "body" },
-    { id: "irritable", domain: "contact" },
+    { id: "fun", domain: "feeling" },       // less fun: doing it out of fear of failing (Reagyano, round 2)
+    { id: "selfanger", domain: "feeling" }, // very angry with yourself after a mistake (Reagyano, round 2)
     { id: "alone", domain: "contact" },
   ];
-  const DOMAINS = ["energy", "head", "body", "contact"];
+  const DOMAINS = ["energy", "head", "feeling", "contact"];
   const OCCUPATIONS = ["vo", "mbo", "hbo", "work", "combo", "other"];
   const SOURCES = ["study", "work", "sport", "home", "money", "future", "social", "self"];
-  const RECIPIENTS = ["friend", "parent", "teacher", "coach", "other", "nobody"];
-  const MESSAGE_RECIPIENTS = ["friend", "parent", "teacher", "coach"]; // "other" gets the friend-tone message
+  const RECIPIENTS = ["friend", "parent", "teacher", "coach", "pro", "other", "nobody"];
+  const MESSAGE_RECIPIENTS = ["friend", "parent", "teacher", "coach", "pro"]; // "other" gets the friend-tone message
+  const REACTIONS = ["carryon", "withdraw", "delay", "angry", "talk", "none", "other"];
   const STRENGTHS = ["sport", "friends", "rest", "structure", "hobby", "other"];
 
   // Follow-up options per signal; `sport: true` options only appear when "sport" is a chosen source.
@@ -261,8 +265,8 @@ const Engine = (() => {
     worry: [{ id: "tests" }, { id: "perform" }, { id: "money" }, { id: "others" }, { id: "future" }, { id: "other" }],
     enough: [{ id: "self" }, { id: "parents" }, { id: "coach" }, { id: "peers" }, { id: "social" }, { id: "other" }],
     start: [{ id: "big" }, { id: "many" }, { id: "all" }, { id: "procrast" }, { id: "other" }],
-    body: [{ id: "before" }, { id: "allday" }, { id: "evening" }, { id: "other" }],
-    irritable: [{ id: "tired" }, { id: "home" }, { id: "work" }, { id: "perform" }, { id: "other" }],
+    fun: [{ id: "sport", sport: true }, { id: "study" }, { id: "work" }, { id: "all" }, { id: "other" }],
+    selfanger: [{ id: "replay" }, { id: "harsh" }, { id: "quit" }, { id: "other" }],
   };
   const SOURCE_FOLLOWUPS = {
     sport: ["perform", "selection", "sideline", "mistake", "doubt", "injury", "fun", "combine", "other"],
@@ -284,9 +288,9 @@ const Engine = (() => {
     "sig.worry.tests": "exam-prep", "sig.worry.perform": "sport-focus", "sig.worry.money": "money", "sig.worry.others": "selftalk", "sig.worry.future": "next-step", "sig.worry.generic": "worry-write",
     "sig.enough.self": "selftalk", "sig.enough.parents": "expectations-talk", "sig.enough.coach": "feedback", "sig.enough.peers": "compare", "sig.enough.social": "compare", "sig.enough.generic": "selftalk",
     "sig.start.big": "chunking", "sig.start.many": "prioritize", "sig.start.all": "prioritize", "sig.start.procrast": "chunking", "sig.start.generic": "chunking",
-    "sig.body.before": "breathing", "sig.body.allday": "movement", "sig.body.evening": "relax", "sig.body.generic": "breathing",
-    "sig.irritable.tired": "recovery", "sig.irritable.home": "pause", "sig.irritable.work": "pause", "sig.irritable.perform": "pause", "sig.irritable.generic": "pause",
-    "sig.alone.friend": "support", "sig.alone.parent": "support", "sig.alone.teacher": "support", "sig.alone.coach": "support", "sig.alone.nobody": "support", "sig.alone.generic": "support",
+    "sig.fun.sport": "motivation", "sig.fun.study": "motivation", "sig.fun.work": "motivation", "sig.fun.all": "motivation", "sig.fun.generic": "motivation",
+    "sig.selfanger.replay": "sport-reset", "sig.selfanger.harsh": "selftalk", "sig.selfanger.quit": "fear-fail", "sig.selfanger.generic": "sport-reset",
+    "sig.alone.friend": "support", "sig.alone.parent": "support", "sig.alone.teacher": "support", "sig.alone.coach": "support", "sig.alone.pro": "support", "sig.alone.nobody": "support", "sig.alone.generic": "support",
     "src.sport.perform": "sport-focus", "src.sport.selection": "sport-control", "src.sport.sideline": "expectations-talk", "src.sport.mistake": "sport-reset",
     "src.sport.doubt": "selftalk", "src.sport.injury": "sport-control", "src.sport.fun": "motivation", "src.sport.combine": "planning", "src.sport.generic": "sport-control",
     "src.study.tests": "exam-prep", "src.study.planning": "planning", "src.study.internship": "next-step", "src.study.doubt": "next-step", "src.study.generic": "next-step",
@@ -429,15 +433,26 @@ const Engine = (() => {
     return [...urgent, ...list.filter((x) => !urgent.includes(x))];
   }
 
-  // Ordered result sections with display flags (plan §B10). "coach" (contact with Reagyano) always comes
-  // after the help lines, never above them (plan §2b).
+  // "Dit neem ik mee": the short summary a young person can show their coach (feedback round 2, point 6).
+  function summary(s) {
+    const src = heaviestSource(s);
+    return {
+      source: src, sourceAnswer: src ? s.followups[`src.${src}`] || null : null, unknownSource: s.sources.includes("unknown"),
+      signals: rankedSignals(s).filter((id) => signalScore(s, id) >= 2).slice(0, 3),
+      reaction: REACTIONS.includes(s.reaction) ? s.reaction : null,
+      recipient: recipientOf(s),
+    };
+  }
+
+  // Ordered result sections with display flags (plan §B10). The summary sits right under the gauge (or under
+  // the help when overloaded). "coach" (contact with Reagyano) always comes after the help lines (plan §2b).
   function resultLayout(s) {
     const c = resultCase(s);
     const notAlone = { id: "notAlone", self: s.sources.includes("self") };
     const help = (open) => ({ id: "help", open, list: helpList(s) });
-    if (c === "high") return [{ id: "zone" }, help(true), { id: "support" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "coach" }, { id: "again" }];
-    if (c === "watch") return [{ id: "zone" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "talk" }, help(true), { id: "coach" }, { id: "again" }];
-    return [{ id: "zone" }, { id: "signals", compact: c === "calm" }, { id: "advice" }, { id: "talk" }, help(false), { id: "coach" }, { id: "again" }];
+    if (c === "high") return [{ id: "zone" }, help(true), { id: "summary" }, { id: "support" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "coach" }, { id: "again" }];
+    if (c === "watch") return [{ id: "zone" }, { id: "summary" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "talk" }, help(true), { id: "coach" }, { id: "again" }];
+    return [{ id: "zone" }, { id: "summary" }, { id: "signals", compact: c === "calm" }, { id: "advice" }, { id: "talk" }, help(false), { id: "coach" }, { id: "again" }];
   }
 
   // Everything the result screen needs, in one call.
@@ -451,6 +466,7 @@ const Engine = (() => {
       strategies: pickStrategies(s),
       talk: talk(s),
       layout: resultLayout(s),
+      summary: summary(s),
     };
   }
 
@@ -474,13 +490,13 @@ const Engine = (() => {
       ["recipient", RECIPIENTS], ["strength", STRENGTHS],
     ];
     const topics = ["generic", ...SOURCES, ...SOURCE_FOLLOWUPS.sport.filter((a) => a !== "other").map((a) => `sport.${a}`)];
-    return { strategies, questions, topics, signals: SIGNALS.map((x) => x.id), domains: DOMAINS, sources: SOURCES, occupations: OCCUPATIONS, recipients: RECIPIENTS, messageRecipients: MESSAGE_RECIPIENTS };
+    return { strategies, questions, topics, signals: SIGNALS.map((x) => x.id), domains: DOMAINS, sources: SOURCES, occupations: OCCUPATIONS, recipients: RECIPIENTS, messageRecipients: MESSAGE_RECIPIENTS, reactions: REACTIONS };
   }
 
   return {
-    SIGNALS, DOMAINS, OCCUPATIONS, SOURCES, RECIPIENTS, STRENGTHS, THEMES, ZONE, MAX,
+    SIGNALS, DOMAINS, OCCUPATIONS, SOURCES, RECIPIENTS, STRENGTHS, REACTIONS, THEMES, ZONE, MAX,
     zoneOf, resultCase, rankedSignals, heaviestSource, needsHeaviest, nextQuestions, optionsFor,
-    pickStrategies, talk, helpList, resultLayout, result, gaugePosition, record, contentKeys,
+    pickStrategies, talk, helpList, summary, resultLayout, result, gaugePosition, record, contentKeys,
   };
 })();
 
@@ -495,6 +511,7 @@ const CONTENT_NL = {
     h1: "Hoeveel druk voel jij deze week?",
     lede: "Druk hoort erbij. Het helpt je soms zelfs. Deze check laat zien of jouw druk nog gezond is en wat je vandaag al kunt doen.",
     facts: ["2 minuten", "Anoniem", "Geen account nodig"],
+    steps: ["Beantwoord een paar korte vragen over de afgelopen week.", "Zie welke signalen je merkt en waar je druk vandaan komt.", "Kies één ding dat je vandaag al doet."],
     start: "Start de check",
     next: "Volgende",
     back: "Terug",
@@ -549,16 +566,23 @@ const CONTENT_NL = {
     items: {
       time: { q: "Ik heb geen tijd meer voor dingen die me energie geven, zoals sport, hobby's of vrienden.", name: "Geen tijd voor energie" },
       sleep: { q: "Ik slaap slechter of korter dan normaal.", name: "Slecht slapen" },
-      worry: { q: "Ik blijf piekeren over wat ik nog moet doen of wat er mis kan gaan.", name: "Piekeren" },
-      enough: { q: "Ik heb het gevoel dat wat ik doe nooit goed genoeg is.", name: "Nooit goed genoeg" },
+      worry: { q: "Ik blijf piekeren over wat ik moet doen of wat er mis kan gaan, zoals bij een toets of wedstrijd.", name: "Piekeren" },
+      enough: { q: "Ik heb het gevoel dat wat ik doe nooit goed genoeg is, op school, werk of in mijn sport.", name: "Nooit goed genoeg" },
       start: { q: "Ik zie op tegen wat er komt en weet niet waar ik moet beginnen.", name: "Niet weten waar te beginnen" },
-      body: { q: "Ik merk spanning in mijn lijf, zoals hoofdpijn, buikpijn of gespannen spieren.", name: "Spanning in je lijf" },
-      irritable: { q: "Ik ben sneller geïrriteerd of kortaf tegen anderen.", name: "Kortaf zijn" },
+      fun: { q: "Ik doe dingen meer uit angst om te falen dan omdat ik ze leuk vind, zoals mijn studie of sport.", name: "Minder plezier, meer angst" },
+      selfanger: { q: "Na een fout, bijvoorbeeld in een wedstrijd of bij een toets, word ik heel boos op mezelf.", name: "Boos op jezelf na een fout" },
       alone: { q: "Ik probeer alles zelf op te lossen en vraag niemand om hulp.", name: "Alles alleen doen" },
     },
   },
 
-  domains: { energy: "Energie", head: "Hoofd", body: "Lichaam", contact: "Contact" },
+  domains: { energy: "Energie", head: "Hoofd", feeling: "Gevoel", contact: "Contact" },
+
+  // One recent moment (feedback round 2, point 2): asked after the signals, shown in the summary.
+  reaction: {
+    intro: "Denk aan één moment van de afgelopen week waarop je druk voelde.",
+    q: "Wat deed je toen?",
+    options: { carryon: "Gewoon doorgaan alsof er niets was", withdraw: "Me terugtrekken of alleen zijn", delay: "Uitstellen of wegscrollen", angry: "Boos of geïrriteerd worden", talk: "Erover praten met iemand", none: "Ik had geen moment van druk", other: "Iets anders" },
+  },
 
   followups: {
     "sig.time": { q: "Waar gaat je tijd vooral naartoe?", options: { study: "School of studie", job: "Werk of bijbaan", sport: "Training en wedstrijden", unclear: "Weet ik niet precies", other: "Iets anders" } },
@@ -566,9 +590,9 @@ const CONTENT_NL = {
     "sig.worry": { q: "Waar pieker je het meest over?", options: { tests: "Toetsen en deadlines", perform: "Wedstrijden of prestaties", money: "Geld", others: "Wat anderen van me denken", future: "De toekomst", other: "Iets anders" } },
     "sig.enough": { q: "Wiens oordeel weegt het zwaarst?", options: { self: "Mijn eigen oordeel", parents: "Van mijn ouders", coach: "Van docent of coach", peers: "Van teamgenoten of vrienden", social: "Van social media", other: "Iets anders" } },
     "sig.start": { q: "Hoe ziet het eruit?", options: { big: "Eén grote deadline", many: "Heel veel kleine taken", all: "Alles tegelijk", procrast: "Ik blijf uitstellen", other: "Iets anders" } },
-    "sig.body": { q: "Wanneer merk je het vooral?", options: { before: "Voor toetsen of wedstrijden", allday: "De hele dag", evening: "'s Avonds of in bed", other: "Iets anders" } },
-    "sig.irritable": { q: "Wanneer gebeurt het vooral?", options: { tired: "Als ik moe ben", home: "Thuis", work: "Op training of werk", perform: "Als ik moet presteren", other: "Iets anders" } },
-    recipient: { q: "Met wie praat je het makkelijkst?", options: { friend: "Een vriend of vriendin", parent: "Een ouder", teacher: "Docent of mentor", coach: "Coach of trainer", nobody: "Niemand eigenlijk", other: "Iemand anders" } },
+    "sig.fun": { q: "Waar merk je het vooral?", options: { sport: "In mijn sport", study: "Op school of in mijn studie", work: "Op mijn werk", all: "Eigenlijk overal", other: "Iets anders" } },
+    "sig.selfanger": { q: "Wat gebeurt er dan meestal?", options: { replay: "Ik blijf de fout in mijn hoofd herhalen", harsh: "Ik praat heel hard tegen mezelf", quit: "Ik wil stoppen of geef het op", other: "Iets anders" } },
+    recipient: { q: "Met wie praat je het makkelijkst?", options: { friend: "Een vriend of vriendin", parent: "Een ouder", teacher: "Docent of mentor", coach: "Coach of trainer", pro: "Studentpsycholoog, vertrouwenspersoon of huisarts", nobody: "Niemand eigenlijk", other: "Iemand anders" } },
     strength: { q: "Wat helpt je nu het meest om druk aan te kunnen?", options: { sport: "Sporten of bewegen", friends: "Tijd met vrienden", rest: "Genoeg rust en slaap", structure: "Een vaste planning", hobby: "Een hobby", other: "Iets anders" } },
     "src.sport": { q: "Wat geeft in je sport de meeste druk?", options: { perform: "Presteren in wedstrijden", selection: "Selectie of basisplaats", sideline: "Coach of ouders langs de lijn", mistake: "Na een fout blijven hangen", doubt: "Twijfel aan mezelf", injury: "Blessure of bankzitten", fun: "Het plezier is weg", combine: "Sport combineren met school of werk", other: "Iets anders" } },
     "src.study": { q: "Wat speelt er het meest bij je studie?", options: { tests: "Toetsen of herkansingen", planning: "Planning", internship: "Stage of afstuderen", doubt: "Twijfel over mijn studie", other: "Iets anders" } },
@@ -614,22 +638,23 @@ const CONTENT_NL = {
     "sig.start.all": { t: "Moet, kan of mag weg", w: "Als alles tegelijk komt, lijkt alles even belangrijk. Dat is het niet.", d: "Zet vandaag elke taak in één van drie rijtjes: moet deze week, kan later, mag weg.", k: "Werk deze week alleen aan het rijtje 'moet'. Schrap minstens één taak uit 'mag weg'." },
     "sig.start.procrast": { t: "Begin met twee minuten", w: "Uitstellen gaat vaak niet over luiheid. Beginnen voelt gewoon zwaarder dan doorgaan.", d: "Kies vandaag één taak die je uitstelt. Werk er twee minuten aan. Daarna mag je stoppen.", k: "Doe deze week elke dag één start van twee minuten. Vaak ga je daarna vanzelf door." },
 
-    "sig.body.generic": { t: "Adem langzaam uit", w: "Spanning in je lijf zakt sneller als je langzaam uitademt.", d: "Adem vandaag drie minuten 4 tellen in en 6 tellen uit. Doe het nu meteen.", k: "Doe dit deze week elke dag één keer, op een vast moment." },
-    "sig.body.before": { t: "Maak een vaste routine voor het moment", w: "Voor een toets of wedstrijd zegt je lijf: dit is belangrijk. Een routine helpt je dat te sturen.", d: "Bedenk vandaag een routine van 3 minuten: 4 tellen in, 6 tellen uit, en één zin voor jezelf.", k: "Oefen die routine deze week drie keer, ook als er niets spannends is. Gebruik hem voor je volgende toets of wedstrijd." },
-    "sig.body.allday": { t: "Beweeg de spanning eruit", w: "Als je de hele dag gespannen bent, krijgt je lijf geen moment rust.", d: "Loop vandaag 10 minuten buiten, zonder telefoon in je hand.", k: "Plan deze week elke dag een beweegmoment van 10 minuten." },
-    "sig.body.evening": { t: "Ontspan voor het slapen", w: "'s Avonds valt de afleiding weg. Dan merk je pas hoe gespannen je bent.", d: "Span vanavond in bed je spieren 5 tellen aan en laat los. Begin bij je voeten en eindig bij je schouders.", k: "Doe deze oefening deze week vijf avonden." },
+    "sig.fun.generic": { t: "Zoek je plezier terug", w: "Als angst om te falen het overneemt, verdwijnt het plezier. Dan wordt alles zwaarder.", d: "Schrijf vandaag op wat je vroeger leuk vond aan wat je nu doet.", k: "Doe deze week twee keer iets alleen omdat je het leuk vindt. Zonder doel of cijfer." },
+    "sig.fun.sport": { t: "Speel weer voor jezelf", w: "Angst om te falen kan het plezier in je sport wegdrukken. Juist plezier helpt je beter te spelen.", d: "Schrijf vandaag op welk moment in je sport je het leukst vindt, en waarom.", k: "Kies deze week op elke training één moment om dat te doen, zonder op fouten te letten." },
+    "sig.fun.study": { t: "Vind terug waarom je dit doet", w: "Als je alleen nog leert om niet te falen, verdwijnt de interesse. Dat maakt leren zwaarder.", d: "Schrijf vandaag één onderwerp uit je studie op dat je wél interessant vindt.", k: "Besteed deze week twee keer 20 minuten aan dat onderwerp, zonder toets of cijfer in je hoofd." },
+    "sig.fun.work": { t: "Zoek het leuke in je werk", w: "Als werk alleen nog een verplichting is, kost elke dienst meer energie.", d: "Schrijf vandaag één ding op dat je wél leuk vindt aan je werk.", k: "Let deze week bij elke dienst op dat ene ding. Is er niets meer leuk? Bespreek het met je leidinggevende." },
+    "sig.fun.all": { t: "Plan iets alleen voor de lol", w: "Als overal angst om te falen meespeelt, heb je een plek nodig waar je niet hoeft te presteren.", d: "Zet vandaag één moment in je agenda voor iets waar je niet in hoeft te presteren.", k: "Doe deze week twee keer iets alleen voor de lol, zonder doel en zonder resultaat." },
 
-    "sig.irritable.generic": { t: "Neem even afstand", w: "Kortaf zijn is vaak een teken dat je emmer vol zit.", d: "Merk je vandaag dat je geïrriteerd raakt? Neem 5 minuten pauze en adem 4 tellen in en 6 tellen uit.", k: "Let deze week op wanneer het gebeurt. Schrijf het drie keer op: hoe laat en bij welke taak?" },
-    "sig.irritable.tired": { t: "Laad eerst op", w: "Als je moe bent, is je lontje korter. Dat ligt niet aan de ander.", d: "Neem vandaag 15 minuten echte rust, zonder scherm.", k: "Ga deze week drie avonden een half uur eerder naar bed." },
-    "sig.irritable.home": { t: "Maak thuis een pauzeknop", w: "Thuis is er weinig ruimte om af te koelen. Dan loopt het sneller op.", d: "Spreek vandaag met jezelf af: als het oploopt, zeg ik 'ik kom zo terug' en loop ik 5 minuten weg.", k: "Gebruik die pauzeknop deze week elke keer dat het nodig is. Praat daarna rustig verder." },
-    "sig.irritable.work": { t: "Een korte pauze op training of werk", w: "Op training of werk ga je door, ook als je vol zit. Een korte pauze houdt je scherp.", d: "Kies vandaag een vast moment voor een pauze van 2 minuten tijdens je training of dienst.", k: "Neem die pauze deze week bij elke training of dienst. Loopt het op? Zeg het tegen je coach of leidinggevende." },
-    "sig.irritable.perform": { t: "Van irritatie naar focus", w: "Druk om te presteren kan eruit komen als irritatie naar anderen.", d: "Bedenk vandaag één woord dat je zegt als je irritatie voelt. Bijvoorbeeld 'reset' of 'volgende'.", k: "Gebruik dat woord deze week bij elke training of toets. Kies daarna meteen je volgende actie." },
+    "sig.selfanger.generic": { t: "Van fout naar volgende stap", w: "Boos worden op jezelf na een fout kost energie. Je leert er weinig van.", d: "Kies vandaag een korte reset voor na een fout: adem uit en zeg 'volgende'.", k: "Gebruik die reset deze week na elke fout. Schrijf daarna één ding op dat je ervan leert." },
+    "sig.selfanger.replay": { t: "Stop de herhaling", w: "Een fout in je hoofd blijven herhalen maakt hem groter dan hij was.", d: "Schrijf vandaag de fout op in één zin. Zet eronder: wat doe ik de volgende keer anders?", k: "Merk je deze week dat je een fout blijft herhalen? Lees dan je zin en kies je volgende actie." },
+    "sig.selfanger.harsh": { t: "Praat tegen jezelf als een coach", w: "Een goede coach scheldt je niet uit na een fout, maar helpt je verder.", d: "Schrijf vandaag op wat je na een fout tegen jezelf zegt. Herschrijf het zoals een goede coach het zou zeggen.", k: "Gebruik deze week na elke fout die coachzin. Doe dit minstens drie keer." },
+    "sig.selfanger.quit": { t: "Eén fout is niet alles", w: "Na een fout willen stoppen voelt logisch. Maar één fout zegt niets over wat je kunt.", d: "Schrijf vandaag drie dingen op die je de afgelopen week goed deed.", k: "Ga na je volgende fout deze week toch door met je volgende actie. Kijk daarna hoe dat voelde." },
 
     "sig.alone.generic": { t: "Vertel het aan één persoon", w: "Alles alleen willen doen voelt sterk, maar maakt de druk vaak groter.", d: "Stuur vandaag een bericht aan iemand die je vertrouwt. Verderop staat een tekst die je kunt gebruiken.", k: "Vraag deze week om één concreet ding: even luisteren, meedenken of samen iets doen." },
     "sig.alone.friend": { t: "Vertel het aan een vriend", w: "Alles alleen willen doen voelt sterk, maar maakt de druk vaak groter.", d: "Stuur vandaag een bericht aan een vriend of vriendin. Verderop staat een tekst die je kunt gebruiken.", k: "Vraag deze week om één concreet ding: even luisteren, meedenken of samen iets doen." },
     "sig.alone.parent": { t: "Vertel het thuis", w: "Ouders merken vaak minder dan je denkt. Als je het zegt, kunnen ze helpen.", d: "Vraag vandaag of je vanavond 10 minuten met je ouder kunt praten. Verderop staat een bericht.", k: "Vraag deze week om één concreet ding: luisteren, meedenken of iets van je overnemen." },
     "sig.alone.teacher": { t: "Vertel het je mentor of docent", w: "Je mentor of docent kan vaak meer regelen dan je denkt.", d: "Stuur vandaag je mentor of docent een kort bericht. Verderop staat een tekst die je kunt gebruiken.", k: "Spreek deze week één gesprek af. Neem één vraag mee: wat kan ik als eerste doen?" },
     "sig.alone.coach": { t: "Vertel het je coach", w: "Een goede coach wil weten wat er speelt. Ook buiten het veld.", d: "Vraag vandaag of je na de training even met je coach kunt praten. Verderop staat een bericht.", k: "Vertel deze week in dat gesprek wat er speelt. Vraag je coach om mee te denken over je planning." },
+    "sig.alone.pro": { t: "Maak een afspraak", w: "Een studentpsycholoog, vertrouwenspersoon of huisarts is er precies voor dit soort momenten.", d: "Zoek vandaag op hoe je een afspraak maakt. Verderop staat een bericht dat je kunt gebruiken.", k: "Maak deze week die afspraak. Je hoeft nog niet te weten wat je precies wilt zeggen." },
     "sig.alone.nobody": { t: "Begin anoniem", w: "Je hoeft nog niemand te weten. Praten met een onbekende is soms juist makkelijker.", d: "Chat vandaag 10 minuten met In je bol of De Kindertelefoon. Het is gratis en anoniem.", k: "Bedenk deze week één persoon bij wie je het een klein beetje kunt vertellen." },
 
     "src.sport.perform": { t: "Speel de actie, niet de uitslag", w: "Druk in wedstrijden gaat vaak over de uitslag. Jij controleert alleen je volgende actie.", d: "Kies vandaag één procesdoel voor je volgende wedstrijd. Bijvoorbeeld: elke bal vragen, of na elke fout aanmoedigen.", k: "Beoordeel jezelf na je volgende wedstrijd alleen op dat doel. Geef jezelf een cijfer van 1 tot 10." },
@@ -682,13 +707,26 @@ const CONTENT_NL = {
   },
 
   zoneNames: ["Gezonde spanning", "Let op", "Overbelast"],
-  zoneShort: ["Je houdt het in balans.", "Signalen dat druk de overhand krijgt.", "Veel signalen tegelijk. Tijd voor steun."],
   zoneText: {
     calmLow: "Je merkt nu weinig druk. Mooi. Weet wat je daarbij helpt, dan houd je het vast.",
     calm: "Je merkt soms wat spanning, maar niets vaak. Je houdt het goed in balans.",
     mild: "Je houdt het in balans, maar een paar signalen merk je vaak. Daar kun je nu al iets mee.",
     watch: "Er zijn signalen dat de druk de overhand begint te krijgen. Nu bijsturen is een stuk makkelijker dan wachten.",
     high: "Je merkt veel signalen tegelijk. Dat is zwaar, en je hoeft het niet alleen op te lossen. Praat er deze week met iemand over.",
+  },
+
+  // "Dit neem ik mee": short summary for a conversation with a coach (feedback round 2, point 6).
+  summary: {
+    h: "Dit neem ik mee het gesprek in",
+    p: "Laat dit zien aan je coach, mentor of iemand die je vertrouwt. Het blijft op je telefoon.",
+    source: "Mijn druk komt vooral van",
+    signals: "Wat ik vaak merk",
+    reaction: "Wat ik deed op een druk moment",
+    recipient: "Bij wie ik terecht kan",
+    action: "Wat ik ga doen",
+    noSignals: "Niets vaak",
+    unknown: "Weet ik nog niet precies",
+    actionHint: "Tik hieronder bij een advies op 'Dit ga ik doen'.",
   },
 
   signalCard: { h: "Wat je merkt", compact: "Geen signalen die je vaak merkt.", often: "Vaak of bijna altijd" },
@@ -718,10 +756,10 @@ const CONTENT_NL = {
 
   // Message = opener + middle(topic) + ask (plan §B4).
   messages: {
-    recipientLabel: { friend: "Vriend", parent: "Ouder", teacher: "Docent of mentor", coach: "Coach" },
-    opener: { friend: "Hey,", parent: "Hoi,", teacher: "Hallo,", coach: "Hoi coach," },
+    recipientLabel: { friend: "Vriend", parent: "Ouder", teacher: "Docent of mentor", coach: "Coach", pro: "Psycholoog of huisarts" },
+    opener: { friend: "Hey,", parent: "Hoi,", teacher: "Hallo,", coach: "Hoi coach,", pro: "Beste," },
     middle: "ik merk dat {topic} me de laatste tijd meer doet dan normaal.",
-    ask: { friend: "Zin om even bij te kletsen?", parent: "Kunnen we er vanavond even over praten?", teacher: "Kunnen we kort bespreken wat ik het beste eerst kan doen?", coach: "Kunnen we na de training even kort praten?" },
+    ask: { friend: "Zin om even bij te kletsen?", parent: "Kunnen we er vanavond even over praten?", teacher: "Kunnen we kort bespreken wat ik het beste eerst kan doen?", coach: "Kunnen we na de training even kort praten?", pro: "Kan ik een afspraak maken om hierover te praten?" },
     topic: {
       generic: "alle drukte",
       study: "de druk van school en studie",
@@ -793,6 +831,7 @@ const CONTENT_EN = {
     h1: "How much pressure are you feeling this week?",
     lede: "Pressure is normal. Sometimes it even helps. This check shows whether your pressure is still healthy and what you can do about it today.",
     facts: ["2 minutes", "Anonymous", "No account needed"],
+    steps: ["Answer a few short questions about the last week.", "See which signals you notice and where your pressure comes from.", "Pick one thing you can do today."],
     start: "Start the check",
     next: "Next",
     back: "Back",
@@ -847,16 +886,22 @@ const CONTENT_EN = {
     items: {
       time: { q: "I have no time left for things that give me energy, like sport, hobbies or friends.", name: "No time for energy" },
       sleep: { q: "I sleep worse or less than usual.", name: "Poor sleep" },
-      worry: { q: "I keep worrying about what I still need to do or what could go wrong.", name: "Worrying" },
-      enough: { q: "I feel like what I do is never good enough.", name: "Never good enough" },
+      worry: { q: "I keep worrying about what I need to do or what could go wrong, like before a test or match.", name: "Worrying" },
+      enough: { q: "I feel like what I do is never good enough, at school, work or in my sport.", name: "Never good enough" },
       start: { q: "I dread what's coming and don't know where to start.", name: "Not knowing where to start" },
-      body: { q: "I notice tension in my body, like headaches, stomach aches or tight muscles.", name: "Tension in your body" },
-      irritable: { q: "I get irritated or snap at people more easily.", name: "Snapping at people" },
+      fun: { q: "I do things more out of fear of failing than because I enjoy them, like my studies or sport.", name: "Less fun, more fear" },
+      selfanger: { q: "After a mistake, for example in a match or on a test, I get really angry with myself.", name: "Angry with yourself after a mistake" },
       alone: { q: "I try to solve everything myself and don't ask anyone for help.", name: "Doing it all alone" },
     },
   },
 
-  domains: { energy: "Energy", head: "Mind", body: "Body", contact: "Connection" },
+  domains: { energy: "Energy", head: "Mind", feeling: "Feelings", contact: "Connection" },
+
+  reaction: {
+    intro: "Think of one moment in the last week when you felt pressure.",
+    q: "What did you do then?",
+    options: { carryon: "Carried on as if nothing was wrong", withdraw: "Pulled back or wanted to be alone", delay: "Put things off or scrolled", angry: "Got angry or irritated", talk: "Talked to someone about it", none: "I didn't have a moment of pressure", other: "Something else" },
+  },
 
   followups: {
     "sig.time": { q: "Where does most of your time go?", options: { study: "School or studying", job: "Work or side job", sport: "Training and matches", unclear: "Not really sure", other: "Something else" } },
@@ -864,9 +909,9 @@ const CONTENT_EN = {
     "sig.worry": { q: "What do you worry about the most?", options: { tests: "Tests and deadlines", perform: "Matches or performing", money: "Money", others: "What others think of me", future: "The future", other: "Something else" } },
     "sig.enough": { q: "Whose judgement weighs the most?", options: { self: "My own", parents: "My parents'", coach: "My teacher's or coach's", peers: "Teammates' or friends'", social: "Social media's", other: "Something else" } },
     "sig.start": { q: "What does it look like?", options: { big: "One big deadline", many: "Lots of small tasks", all: "Everything at once", procrast: "I keep putting things off", other: "Something else" } },
-    "sig.body": { q: "When do you notice it most?", options: { before: "Before tests or matches", allday: "All day", evening: "In the evening or in bed", other: "Something else" } },
-    "sig.irritable": { q: "When does it mostly happen?", options: { tired: "When I'm tired", home: "At home", work: "At training or work", perform: "When I have to perform", other: "Something else" } },
-    recipient: { q: "Who do you find it easiest to talk to?", options: { friend: "A friend", parent: "A parent", teacher: "Teacher or mentor", coach: "Coach or trainer", nobody: "Nobody, really", other: "Someone else" } },
+    "sig.fun": { q: "Where do you notice it most?", options: { sport: "In my sport", study: "At school or in my studies", work: "At work", all: "Pretty much everywhere", other: "Something else" } },
+    "sig.selfanger": { q: "What usually happens then?", options: { replay: "I keep replaying the mistake in my head", harsh: "I'm really harsh on myself", quit: "I want to quit or give up", other: "Something else" } },
+    recipient: { q: "Who do you find it easiest to talk to?", options: { friend: "A friend", parent: "A parent", teacher: "Teacher or mentor", coach: "Coach or trainer", pro: "Student psychologist, confidential adviser or GP", nobody: "Nobody, really", other: "Someone else" } },
     strength: { q: "What helps you most to handle pressure right now?", options: { sport: "Sport or exercise", friends: "Time with friends", rest: "Enough rest and sleep", structure: "A fixed routine", hobby: "A hobby", other: "Something else" } },
     "src.sport": { q: "What gives you the most pressure in your sport?", options: { perform: "Performing in matches", selection: "Selection or a starting spot", sideline: "Coach or parents on the sideline", mistake: "Getting stuck after a mistake", doubt: "Doubting myself", injury: "Injury or sitting on the bench", fun: "The fun is gone", combine: "Combining sport with school or work", other: "Something else" } },
     "src.study": { q: "What's going on most with your studies?", options: { tests: "Tests or resits", planning: "Planning", internship: "Internship or graduating", doubt: "Doubts about my studies", other: "Something else" } },
@@ -911,22 +956,23 @@ const CONTENT_EN = {
     "sig.start.all": { t: "Must, later or drop", w: "When everything comes at once, it all seems equally important. It isn't.", d: "Today, put every task in one of three lists: must do this week, can wait, can go.", k: "This week, only work on the 'must' list. Drop at least one task from 'can go'." },
     "sig.start.procrast": { t: "Start with two minutes", w: "Putting things off is often not about being lazy. Starting just feels heavier than carrying on.", d: "Today, pick one task you keep putting off. Work on it for two minutes. Then you're allowed to stop.", k: "Do one two-minute start every day this week. Often you'll just keep going." },
 
-    "sig.body.generic": { t: "Breathe out slowly", w: "Tension in your body drops faster when you breathe out slowly.", d: "Today, breathe in for 4 counts and out for 6 for three minutes. Do it right now.", k: "Do this once a day this week, at a fixed moment." },
-    "sig.body.before": { t: "Make a fixed routine for the moment", w: "Before a test or match your body says: this matters. A routine helps you steer that.", d: "Today, come up with a 3 minute routine: 4 counts in, 6 counts out, and one sentence for yourself.", k: "Practise that routine three times this week, even when nothing exciting is coming. Use it before your next test or match." },
-    "sig.body.allday": { t: "Move the tension out", w: "If you're tense all day, your body never gets a moment's rest.", d: "Today, walk outside for 10 minutes without your phone in your hand.", k: "Plan a 10 minute moment to move every day this week." },
-    "sig.body.evening": { t: "Relax before sleep", w: "In the evening the distractions fall away. That's when you notice how tense you are.", d: "Tonight in bed, tense your muscles for 5 counts and let go. Start at your feet and end at your shoulders.", k: "Do this exercise on five evenings this week." },
+    "sig.fun.generic": { t: "Find your fun again", w: "When fear of failing takes over, the fun disappears. Then everything feels heavier.", d: "Today, write down what you used to enjoy about what you do now.", k: "Twice this week, do something just because you enjoy it. No goal, no grade." },
+    "sig.fun.sport": { t: "Play for yourself again", w: "Fear of failing can push the fun out of your sport. Yet enjoying it helps you play better.", d: "Today, write down which moment in your sport you enjoy most, and why.", k: "This week, pick one moment at every training to do just that, without watching for mistakes." },
+    "sig.fun.study": { t: "Find back why you do this", w: "When you only study so you don't fail, the interest disappears. That makes studying heavier.", d: "Today, write down one topic from your studies that you do find interesting.", k: "Spend 20 minutes on that topic twice this week, without a test or grade in your head." },
+    "sig.fun.work": { t: "Find what you like about your work", w: "When work is only an obligation, every shift costs more energy.", d: "Today, write down one thing you do like about your work.", k: "Notice that one thing at every shift this week. Nothing fun left? Talk to your manager about it." },
+    "sig.fun.all": { t: "Plan something just for fun", w: "When fear of failing plays a part everywhere, you need a place where you don't have to perform.", d: "Put one moment in your calendar today for something you don't have to perform at.", k: "Twice this week, do something just for fun, without a goal or a result." },
 
-    "sig.irritable.generic": { t: "Take a step back", w: "Snapping at people is often a sign your bucket is full.", d: "Notice yourself getting irritated today? Take a 5 minute break and breathe in for 4 counts and out for 6.", k: "Notice when it happens this week. Write it down three times: what time, and during which task?" },
-    "sig.irritable.tired": { t: "Recharge first", w: "When you're tired, your fuse is shorter. That's not the other person's fault.", d: "Take 15 minutes of real rest today, without a screen.", k: "Go to bed half an hour earlier on three evenings this week." },
-    "sig.irritable.home": { t: "Make a pause button at home", w: "At home there's little room to cool down. So things escalate faster.", d: "Agree with yourself today: when it escalates, I say 'back in a minute' and walk away for 5 minutes.", k: "Use that pause button every time you need it this week. Then carry on talking calmly." },
-    "sig.irritable.work": { t: "A short break at training or work", w: "At training or work you keep going, even when you're full. A short break keeps you sharp.", d: "Today, pick a fixed moment for a 2 minute break during your training or shift.", k: "Take that break at every training or shift this week. Things escalating? Tell your coach or manager." },
-    "sig.irritable.perform": { t: "From irritation to focus", w: "Pressure to perform can come out as irritation towards others.", d: "Today, come up with one word you say when you feel irritated. For example 'reset' or 'next'.", k: "Use that word at every training or test this week. Then pick your next action straight away." },
+    "sig.selfanger.generic": { t: "From mistake to next step", w: "Getting angry with yourself after a mistake costs energy. You learn little from it.", d: "Today, pick a short reset for after a mistake: breathe out and say 'next'.", k: "Use that reset after every mistake this week. Then write down one thing you learn from it." },
+    "sig.selfanger.replay": { t: "Stop the replay", w: "Replaying a mistake in your head makes it bigger than it was.", d: "Today, write the mistake down in one sentence. Below it: what will I do differently next time?", k: "Notice yourself replaying a mistake this week? Read your sentence and pick your next action." },
+    "sig.selfanger.harsh": { t: "Talk to yourself like a coach", w: "A good coach doesn't yell at you after a mistake, but helps you move on.", d: "Today, write down what you tell yourself after a mistake. Rewrite it the way a good coach would say it.", k: "Use that coach sentence after every mistake this week. Do it at least three times." },
+    "sig.selfanger.quit": { t: "One mistake isn't everything", w: "Wanting to quit after a mistake feels logical. But one mistake says nothing about what you can do.", d: "Today, write down three things you did well in the last week.", k: "After your next mistake this week, carry on with your next action anyway. Then notice how that felt." },
 
     "sig.alone.generic": { t: "Tell one person", w: "Wanting to do it all alone feels strong, but often makes the pressure bigger.", d: "Today, send a message to someone you trust. Further down you'll find a text you can use.", k: "Ask for one concrete thing this week: to listen, to think along or to do something together." },
     "sig.alone.friend": { t: "Tell a friend", w: "Wanting to do it all alone feels strong, but often makes the pressure bigger.", d: "Today, send a message to a friend. Further down you'll find a text you can use.", k: "Ask for one concrete thing this week: to listen, to think along or to do something together." },
     "sig.alone.parent": { t: "Tell someone at home", w: "Parents often notice less than you think. If you say it, they can help.", d: "Today, ask if you can talk to your parent for 10 minutes tonight. Further down you'll find a message.", k: "Ask for one concrete thing this week: to listen, to think along or to take something off your plate." },
     "sig.alone.teacher": { t: "Tell your mentor or teacher", w: "Your mentor or teacher can often arrange more than you think.", d: "Today, send your mentor or teacher a short message. Further down you'll find a text you can use.", k: "Set up one conversation this week. Bring one question: what can I do first?" },
     "sig.alone.coach": { t: "Tell your coach", w: "A good coach wants to know what's going on. Off the pitch too.", d: "Today, ask if you can talk to your coach briefly after training. Further down you'll find a message.", k: "In that conversation this week, say what's going on. Ask your coach to think along about your planning." },
+    "sig.alone.pro": { t: "Make an appointment", w: "A student psychologist, confidential adviser or GP is there for exactly these moments.", d: "Today, look up how to make an appointment. Further down you'll find a message you can use.", k: "Make that appointment this week. You don't need to know exactly what to say yet." },
     "sig.alone.nobody": { t: "Start anonymously", w: "You don't need to know anyone yet. Talking to a stranger is sometimes easier.", d: "Today, chat for 10 minutes with In je bol or De Kindertelefoon. It's free and anonymous.", k: "This week, think of one person you could tell a little bit to." },
 
     "src.sport.perform": { t: "Play the action, not the result", w: "Pressure in matches is often about the result. You only control your next action.", d: "Today, pick one process goal for your next match. For example: call for every ball, or encourage after every mistake.", k: "After your next match, judge yourself only on that goal. Give yourself a score from 1 to 10." },
@@ -977,13 +1023,25 @@ const CONTENT_EN = {
   },
 
   zoneNames: ["Healthy tension", "Watch out", "Overloaded"],
-  zoneShort: ["You're keeping it in balance.", "Signs that pressure is taking over.", "Many signals at once. Time for support."],
   zoneText: {
     calmLow: "You notice little pressure right now. Nice. Know what helps you with that, so you can hold on to it.",
     calm: "You sometimes notice some tension, but nothing often. You're keeping it well in balance.",
     mild: "You're keeping it in balance, but you notice a few signals often. You can do something about those now.",
     watch: "There are signs that pressure is starting to take over. Adjusting now is a lot easier than waiting.",
     high: "You're noticing a lot of signals at once. That's heavy, and you don't have to solve it alone. Talk to someone about it this week.",
+  },
+
+  summary: {
+    h: "What I'm taking into the conversation",
+    p: "Show this to your coach, mentor or someone you trust. It stays on your phone.",
+    source: "My pressure mainly comes from",
+    signals: "What I notice often",
+    reaction: "What I did in a moment of pressure",
+    recipient: "Who I can turn to",
+    action: "What I'm going to do",
+    noSignals: "Nothing often",
+    unknown: "Not sure yet",
+    actionHint: "Tap 'I'll do this' on one of the tips below.",
   },
 
   signalCard: { h: "What you notice", compact: "No signals you notice often.", often: "Often or almost always" },
@@ -1012,10 +1070,10 @@ const CONTENT_EN = {
   },
 
   messages: {
-    recipientLabel: { friend: "Friend", parent: "Parent", teacher: "Teacher or mentor", coach: "Coach" },
-    opener: { friend: "Hey,", parent: "Hi,", teacher: "Hello,", coach: "Hi coach," },
+    recipientLabel: { friend: "Friend", parent: "Parent", teacher: "Teacher or mentor", coach: "Coach", pro: "Psychologist or GP" },
+    opener: { friend: "Hey,", parent: "Hi,", teacher: "Hello,", coach: "Hi coach,", pro: "Dear," },
     middle: "I've noticed that {topic} has been getting to me more than usual lately.",
-    ask: { friend: "Want to catch up?", parent: "Could we talk about it tonight?", teacher: "Could we briefly go over what I should do first?", coach: "Could we talk briefly after training?" },
+    ask: { friend: "Want to catch up?", parent: "Could we talk about it tonight?", teacher: "Could we briefly go over what I should do first?", coach: "Could we talk briefly after training?", pro: "Could I make an appointment to talk about this?" },
     topic: {
       generic: "everything going on",
       study: "the pressure of school and studying",
@@ -1109,6 +1167,7 @@ const freshState = () => ({
   sources: params.get("ctx") === "sport" ? ["sport"] : [],
   heaviest: null,
   answers: Array(Engine.SIGNALS.length).fill(null),
+  reaction: null,
   followups: {},
 });
 
@@ -1122,6 +1181,7 @@ const ui = {
   saved: false,
   recipient: null, // message recipient chosen on the result screen
   edits: {},       // messages the user changed, per recipient (or "checkin"), kept when switching
+  chosen: null,    // strategy picked with "Dit ga ik doen", shown in the summary
 };
 const T = () => TEXT[ui.lang];
 const allAnswered = () => ui.s.answers.every((a) => a != null);
@@ -1132,6 +1192,7 @@ function screens() {
   const list = ["intro", "occupation", "sources"];
   if (Engine.needsHeaviest(ui.s)) list.push("heaviest");
   Engine.SIGNALS.forEach((_, i) => list.push(`sig:${i}`));
+  list.push("reaction");
   if (allAnswered()) Engine.nextQuestions(ui.s).forEach((q) => list.push(`fu:${q}`));
   list.push("result");
   return list;
@@ -1215,10 +1276,7 @@ function viewIntro() {
       <p class="lede muted">${esc(U.lede)}</p>
       <div class="facts">${U.facts.map((f) => `<span class="fact">${esc(f)}</span>`).join("")}</div>
     </div>
-    <div class="panel gauge-card">
-      ${gauge(null)}
-      <div class="legend">${L.zoneNames.map((z, i) => `<div><b><span class="dot" style="background:var(${ZONE_VAR[i]})"></span>${esc(z)}</b><span class="muted">${esc(L.zoneShort[i])}</span></div>`).join("")}</div>
-    </div>
+    <div class="panel steps">${U.steps.map((s, i) => `<div class="step"><span class="num">${String(i + 1).padStart(2, "0")}</span><p>${esc(s)}</p></div>`).join("")}</div>
     ${prevLine}
     <p class="hint">${esc(U.notDiagnosis)}</p>
     <div><button class="btn" type="button" data-action="next">${esc(U.start)} →</button></div>
@@ -1276,6 +1334,13 @@ function viewSignal(i) {
     choice(L.signals.scale.map((label, v) => [String(v), label]), ui.s.answers[i] == null ? null : String(ui.s.answers[i]), true));
 }
 
+// One recent moment (feedback round 2): what did you do then? Shown in the summary for the conversation.
+function viewReaction() {
+  const R = T().reaction;
+  return questionFrame(`<p class="lede muted">${esc(R.intro)}</p><h2 tabindex="-1">${esc(R.q)}</h2>`,
+    choice(Engine.REACTIONS.map((o) => [o, R.options[o]]), ui.s.reaction));
+}
+
 function viewFollowup(q) {
   const L = T(), f = L.followups[q];
   return questionFrame(`<h2 tabindex="-1">${esc(f.q)}</h2>`,
@@ -1324,6 +1389,21 @@ function anonBlock(r) {
 }
 
 const SECTIONS = {
+  // "Dit neem ik mee het gesprek in": a short summary to show a coach (feedback round 2, point 6).
+  summary(r) {
+    const L = T(), S = L.summary, m = r.summary;
+    const answer = m.source && m.sourceAnswer && m.sourceAnswer !== "other" ? `: ${L.followups[`src.${m.source}`].options[m.sourceAnswer].toLowerCase()}` : "";
+    const rows = [
+      [S.source, m.source ? L.sources.options[m.source] + answer : S.unknown],
+      [S.signals, m.signals.length ? m.signals.map((id) => L.signals.items[id].name).join(", ") : S.noSignals],
+      ...(m.reaction ? [[S.reaction, L.reaction.options[m.reaction]]] : []),
+      ...(m.recipient ? [[S.recipient, L.followups.recipient.options[m.recipient]]] : []),
+    ];
+    return `<section class="panel stack summary"><h2>${esc(S.h)}</h2>
+      <dl class="sum">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
+        <dt>${esc(S.action)}</dt><dd id="sum-action" class="${ui.chosen ? "" : "muted"}">${esc(ui.chosen ? strategyText(ui.chosen).t : S.actionHint)}</dd></dl>
+      <p class="hint">${esc(S.p)}</p></section>`;
+  },
   zone(r) {
     const L = T(), U = L.ui;
     const text = r.calmLow ? L.zoneText.calmLow : L.zoneText[r.case];
@@ -1443,7 +1523,7 @@ function openPlan(id) {
 }
 
 // ---------- render ----------
-const VIEWS = { intro: viewIntro, occupation: viewOccupation, sources: viewSources, heaviest: viewHeaviest, result: viewResult };
+const VIEWS = { intro: viewIntro, occupation: viewOccupation, sources: viewSources, heaviest: viewHeaviest, reaction: viewReaction, result: viewResult };
 
 function render(moveFocus) {
   const L = T(), U = L.ui, id = screens()[ui.idx];
@@ -1472,6 +1552,7 @@ function pick(value) {
   const [kind, arg] = id.split(/:(.*)/);
   if (id === "occupation") s.occupation = value;
   else if (id === "heaviest") s.heaviest = value;
+  else if (id === "reaction") s.reaction = value;
   else if (kind === "sig") s.answers[+arg] = +value;
   else if (kind === "fu") s.followups[arg] = value;
   prune();
@@ -1508,11 +1589,16 @@ app.addEventListener("click", async (e) => {
     try { await navigator.share({ text: $("msg-text").value }); } catch (err) { /* cancelled */ }
     return;
   }
-  if (btn.dataset.plan) return openPlan(btn.dataset.plan);
+  if (btn.dataset.plan) {
+    ui.chosen = btn.dataset.plan;
+    const action = $("sum-action");
+    if (action) { action.textContent = strategyText(ui.chosen).t; action.classList.remove("muted"); }
+    return openPlan(ui.chosen);
+  }
   const action = btn.dataset.action;
   if (action === "next") go(1);
   if (action === "back") go(-1);
-  if (action === "again") { ui.s = freshState(); ui.idx = 0; ui.saved = false; ui.prev = undefined; ui.edits = {}; render(true); }
+  if (action === "again") { ui.s = freshState(); ui.idx = 0; ui.saved = false; ui.prev = undefined; ui.edits = {}; ui.chosen = null; render(true); }
 });
 
 app.addEventListener("input", (e) => {
