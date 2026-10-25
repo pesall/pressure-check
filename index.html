@@ -108,7 +108,8 @@ a { color: var(--gold); }
 .hero { display: grid; gap: 22px; }
 .hero .lede { font-size: 1.08rem; max-width: 52ch; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; }
-.fact { font-size: .85rem; padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); }
+/* Like the badges on metreagyano.nl (silver-grey border, light grey text), one shade lighter than our black page. */
+.fact { font-size: .85rem; padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid #394045; color: #d0d4d6; }
 .gauge-card { display: grid; gap: 14px; justify-items: center; }
 .legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
 .legend div { display: grid; gap: 2px; font-size: .84rem; }
@@ -119,10 +120,11 @@ a { color: var(--gold); }
 /* gauge */
 .gauge { width: 100%; max-width: 300px; height: auto; display: block; }
 .gauge .needle { transform-box: view-box; transform-origin: 120px 124px; transition: transform 1.1s cubic-bezier(.2,.9,.25,1.15); }
-/* Result gauge: other bands dimmed; the own band lights up as the needle lands (≈1 s), then the text appears. */
-.gauge .seg.off { stroke: #2c3237; } /* neutral, not a dimmed colour: dimmed orange and red read as brown on black */
-.gauge .seg.on { animation: seg-on .5s ease-out .95s both; }
-@keyframes seg-on { from { opacity: .2; } to { opacity: 1; filter: drop-shadow(0 0 5px var(--zone-c)); } }
+/* Result gauge: every band keeps its full colour (dimming orange and red turns them brown on black). The other
+   bands are drawn thin; the own band grows to full width and glows as the needle lands (≈1 s), then the text appears. */
+.gauge .seg.off { stroke-width: 6px; }
+.gauge .seg.on { animation: seg-on .5s ease-out .95s both; filter: drop-shadow(0 0 5px var(--zone-c)); }
+@keyframes seg-on { from { stroke-width: 6px; filter: none; } to { stroke-width: 16px; filter: drop-shadow(0 0 5px var(--zone-c)); } }
 
 /* result: neutral card like the rest, the zone shows as a top line and a soft glow behind the gauge */
 .zone { --zone-c: var(--ok); position: relative; isolation: isolate; overflow: hidden; border-radius: var(--radius); padding: 22px 18px;
@@ -422,14 +424,15 @@ const Engine = (() => {
     return [...urgent, ...list.filter((x) => !urgent.includes(x))];
   }
 
-  // Ordered result sections with display flags (plan §B10).
+  // Ordered result sections with display flags (plan §B10). "coach" (contact with Reagyano) always comes
+  // after the help lines, never above them (plan §2b).
   function resultLayout(s) {
     const c = resultCase(s);
     const notAlone = { id: "notAlone", self: s.sources.includes("self") };
     const help = (open) => ({ id: "help", open, list: helpList(s) });
-    if (c === "high") return [{ id: "zone" }, help(true), { id: "support" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "again" }];
-    if (c === "watch") return [{ id: "zone" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "talk" }, help(true), { id: "again" }];
-    return [{ id: "zone" }, { id: "signals", compact: c === "calm" }, { id: "advice" }, { id: "talk" }, help(false), { id: "again" }];
+    if (c === "high") return [{ id: "zone" }, help(true), { id: "support" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "coach" }, { id: "again" }];
+    if (c === "watch") return [{ id: "zone" }, { id: "signals", compact: false }, { id: "advice" }, notAlone, { id: "talk" }, help(true), { id: "coach" }, { id: "again" }];
+    return [{ id: "zone" }, { id: "signals", compact: c === "calm" }, { id: "advice" }, { id: "talk" }, help(false), { id: "coach" }, { id: "again" }];
   }
 
   // Everything the result screen needs, in one call.
@@ -757,6 +760,15 @@ const CONTENT_NL = {
     },
   },
 
+  coach: {
+    h: "Wil je hier verder mee aan de slag?",
+    p: "Reagyano is mentale coach voor jonge sporters. In een gratis kennismaking van 30 minuten bespreek je wat er speelt en of begeleiding bij je past.",
+    book: "Plan een gratis kennismaking",
+    whatsapp: "Stuur een WhatsApp",
+    waText: "Hoi Reagyano, ik kwam via de Pressure Check bij je terecht. Ik zou graag gratis kennismaken.",
+    note: "Reagyano is geen psycholoog of behandelaar. Gaat het echt niet goed? Gebruik dan de hulplijnen hierboven.",
+  },
+
   again: {
     calm: "Doe de check opnieuw als het drukker wordt.",
     other: "Doe de check volgende week opnieuw. Zo zie je sneller wanneer er iets verandert.",
@@ -1041,6 +1053,15 @@ const CONTENT_EN = {
     },
   },
 
+  coach: {
+    h: "Want to work on this further?",
+    p: "Reagyano is a mental coach for young athletes. In a free 30 minute intro you talk about what's going on and whether coaching suits you.",
+    book: "Book a free intro",
+    whatsapp: "Send a WhatsApp",
+    waText: "Hi Reagyano, I found you through the Pressure Check. I'd like a free intro.",
+    note: "Reagyano is not a psychologist or therapist. Really not doing well? Use the help lines above.",
+  },
+
   again: {
     calm: "Do the check again when things get busier.",
     other: "Do the check again next week. That way you notice sooner when something changes.",
@@ -1057,6 +1078,9 @@ const params = new URLSearchParams(location.search);
 const WORKSHOP = params.get("mode") === "workshop";
 const KEY_LAST = "pc2-last", KEY_LANG = "pc-lang";
 const ADVANCE_MS = 250;
+// Reagyano's own booking and WhatsApp links, as used on metreagyano.nl (checked 25 Oct 2026).
+const COACH_BOOKING = "https://calendly.com/reagyanologan/30min";
+const COACH_WHATSAPP = "31616077153";
 const ZONE_CLASS = ["ok", "warn", "bad"], ZONE_VAR = ["--ok", "--warn", "--bad"];
 
 const $ = (id) => document.getElementById(id);
@@ -1346,6 +1370,16 @@ const SECTIONS = {
     const H = T().help;
     if (!sec.open) return `<details class="panel help"><summary>${esc(H.collapsed)}</summary><div class="stack"><p class="muted">${esc(H.p)}</p>${helpItems(sec.list)}</div></details>`;
     return `<section class="panel help open stack"><h2>${esc(H.h)}</h2><p class="muted">${esc(H.p)}</p>${helpItems(sec.list)}</section>`;
+  },
+  // Plain links: nothing leaves the device unless someone taps one, and the WhatsApp text never holds the result.
+  coach() {
+    const C = T().coach;
+    return `<section class="panel stack coach"><h2>${esc(C.h)}</h2><p class="muted">${esc(C.p)}</p>
+      <div class="actions">
+        <a class="btn" href="${COACH_BOOKING}" target="_blank" rel="noopener">${esc(C.book)}</a>
+        <a class="btn ghost" href="https://wa.me/${COACH_WHATSAPP}?text=${encodeURIComponent(C.waText)}" target="_blank" rel="noopener">${esc(C.whatsapp)}</a>
+      </div>
+      <p class="hint">${esc(C.note)}</p></section>`;
   },
   again(r) {
     const L = T(), U = L.ui;
